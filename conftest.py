@@ -10,6 +10,12 @@ from config import (
 from utils.filter_config import load_products
 import os
 import json
+import time
+from datetime import datetime
+
+from _pytest._io.wcwidth import wcswidth
+from _pytest.terminal import _format_trimmed
+
 import pytest
 import urllib.error
 import urllib.request
@@ -83,38 +89,85 @@ def pytest_generate_tests(metafunc):
         )
 
 
+def pytest_sessionstart(session) -> None:
+    session.config._slack_session_started_at = time.time()
+
+
 def _get_slack_webhook_url() -> str:
     return os.environ.get(SLACK_WEBHOOK_ENV_VAR, "").strip()
 
 
-def _short_traceback(rep, *, max_lines: int = 10) -> str:
-    if not rep.longrepr:
-        return "상세 에러 로그 없음"
-    traceback_lines = str(rep.longrepr).split("\n")
-    return "\n".join(traceback_lines[-max_lines:])
+def _format_duration(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.1f}초"
+    minutes, secs = divmod(int(seconds), 60)
+    if minutes < 60:
+        return f"{minutes}분 {secs}초"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}시간 {minutes}분 {secs}초"
 
 
-def _format_issue_details(issue_reports: list, *, max_cases: int = 3) -> str:
+def _format_session_timing(config) -> str:
+    start_ts = getattr(config, "_slack_session_started_at", None)
+    if start_ts is None:
+        return ""
+
+    start_dt = datetime.fromtimestamp(start_ts)
+    duration = time.time() - start_ts
+    return (
+        f"• *시작 시각:* {start_dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"• *소요 시간:* {_format_duration(duration)}"
+    )
+
+
+def _short_summary_line(config, rep, *, terminal_width: int = 120) -> str:
+    """pytest terminal의 short test summary 한 줄과 동일한 형식."""
+    verbose_word, _ = rep._get_verbose_word_with_markup(config, {})
+    line = f"{verbose_word} {rep.nodeid}"
+    line_width = wcswidth(line)
+
+    msg: str | None = None
+    try:
+        if isinstance(rep.longrepr, str):
+            msg = rep.longrepr
+        else:
+            msg = rep.longrepr.reprcrash.message  # type: ignore[union-attr]
+    except AttributeError:
+        pass
+
+    if msg:
+        available_width = terminal_width - line_width
+        formatted = _format_trimmed(" - {}", msg, available_width)
+        if formatted:
+            line += formatted
+
+    return line
+
+
+def _format_short_test_summary(
+    config, issue_reports: list, *, max_cases: int = 5
+) -> str:
     if not issue_reports:
         return ""
 
-    details = "\n*❌ 실패 원인 분석 (최대 3개 표시):*\n"
-    for rep in issue_reports[:max_cases]:
-        test_name = rep.nodeid.split("::")[-1]
-        short_traceback = _short_traceback(rep)
-        details += f"• *테스트 케이스:* `{test_name}`\n"
-        details += f"```\n{short_traceback}\n```\n"
+    summary_lines = [
+        _short_summary_line(config, rep) for rep in issue_reports[:max_cases]
+    ]
+    details = "\n*short test summary info*\n"
+    details += f"```\n{chr(10).join(summary_lines)}\n```\n"
 
     if len(issue_reports) > max_cases:
         details += (
-            f"• _외 {len(issue_reports) - max_cases}개의 에러가 더 존재합니다. "
+            f"• _외 {len(issue_reports) - max_cases}개의 실패가 더 있습니다. "
             "전체 로그를 확인하세요._\n"
         )
 
     return details
 
 
-def _send_slack_report(terminalreporter, exitstatus: int, webhook_url: str) -> None:
+def _send_slack_report(
+    terminalreporter, exitstatus: int, webhook_url: str, config
+) -> None:
     passed = len(terminalreporter.stats.get("passed", []))
     failed = len(terminalreporter.stats.get("failed", []))
     skipped = len(terminalreporter.stats.get("skipped", []))
@@ -132,14 +185,18 @@ def _send_slack_report(terminalreporter, exitstatus: int, webhook_url: str) -> N
     error_reports = terminalreporter.stats.get("error", [])
     issue_reports = failed_reports + error_reports
 
-    failed_details = _format_issue_details(issue_reports)
+    failed_details = _format_short_test_summary(config, issue_reports)
 
-    summary_text = (
-        f"*{title}*\n"
-        f"• *총 테스트 개수:* {total}개\n"
+    timing_text = _format_session_timing(config)
+    summary_lines = [
+        f"*{title}*",
+        f"• *총 테스트 개수:* {total}개",
         f"• *통과:* {passed}개  |  *실패:* {failed}개  |  "
-        f"*스킵:* {skipped}개  |  *에러:* {errors}개"
-    )
+        f"*스킵:* {skipped}개  |  *에러:* {errors}개",
+    ]
+    if timing_text:
+        summary_lines.append(timing_text)
+    summary_text = "\n".join(summary_lines)
 
     slack_payload = {
         "attachments": [
@@ -197,4 +254,6 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     if skip_reason:
         print(f"[INFO] Slack 리포트 스킵: {skip_reason}")
         return
-    _send_slack_report(terminalreporter, exitstatus, _get_slack_webhook_url())
+    _send_slack_report(
+        terminalreporter, exitstatus, _get_slack_webhook_url(), config
+    )
