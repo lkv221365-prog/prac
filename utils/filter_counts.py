@@ -1,4 +1,4 @@
-SIZE_FILTER_KEYS = ["128 GB", "256 GB", "512 GB", "1 TB"]
+from utils.filter_config import SIZE_FILTER_KEYS
 
 
 def normalize_size(size: str) -> str:

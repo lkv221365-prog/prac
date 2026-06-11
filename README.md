@@ -51,7 +51,7 @@ prac/
 | `converters.py` | JSON 필드용 `as_int`, `as_float` 변환 |
 | `filter_counts.py` | 용량 필터 bitmask 조합별 기대 상품 수 계산 |
 | `filters_execute.py` | 필터 조합 테스트를 pytest 없이 CLI로 실행 |
-| `utils.py` | lazy-load 스크롤, 더보기 버튼 클릭 등 Playwright 헬퍼 |
+| `page_actions.py` | lazy-load 스크롤, 더보기 버튼 클릭 등 Playwright 헬퍼 |
 
 ### `tests/`
 

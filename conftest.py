@@ -4,10 +4,10 @@ from config import (
     ENV_PATH,
     NAV_TIMEOUT,
     PAGE_LOAD_WAIT_MS,
-    PRODUCTS_PATH,
     SLACK_WEBHOOK_ENV_VAR,
     SMARTPHONES_URL,
 )
+from utils.filter_config import load_products
 import os
 import json
 import pytest
@@ -66,11 +66,6 @@ def smartphones_page(page: Page) -> Page:
     page.goto(SMARTPHONES_URL, wait_until="load", timeout=NAV_TIMEOUT)
     page.wait_for_timeout(PAGE_LOAD_WAIT_MS)
     return page
-
-
-def load_products() -> list[dict]:
-    with open(PRODUCTS_PATH, encoding="utf-8") as f:
-        return json.load(f)
 
 
 @pytest.fixture(scope="session")
