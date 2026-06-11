@@ -87,6 +87,33 @@ def _get_slack_webhook_url() -> str:
     return os.environ.get(SLACK_WEBHOOK_ENV_VAR, "").strip()
 
 
+def _short_traceback(rep, *, max_lines: int = 10) -> str:
+    if not rep.longrepr:
+        return "상세 에러 로그 없음"
+    traceback_lines = str(rep.longrepr).split("\n")
+    return "\n".join(traceback_lines[-max_lines:])
+
+
+def _format_issue_details(issue_reports: list, *, max_cases: int = 3) -> str:
+    if not issue_reports:
+        return ""
+
+    details = "\n*❌ 실패 원인 분석 (최대 3개 표시):*\n"
+    for rep in issue_reports[:max_cases]:
+        test_name = rep.nodeid.split("::")[-1]
+        short_traceback = _short_traceback(rep)
+        details += f"• *테스트 케이스:* `{test_name}`\n"
+        details += f"```\n{short_traceback}\n```\n"
+
+    if len(issue_reports) > max_cases:
+        details += (
+            f"• _외 {len(issue_reports) - max_cases}개의 에러가 더 존재합니다. "
+            "전체 로그를 확인하세요._\n"
+        )
+
+    return details
+
+
 def _send_slack_report(terminalreporter, exitstatus: int, webhook_url: str) -> None:
     passed = len(terminalreporter.stats.get("passed", []))
     failed = len(terminalreporter.stats.get("failed", []))
@@ -105,13 +132,7 @@ def _send_slack_report(terminalreporter, exitstatus: int, webhook_url: str) -> N
     error_reports = terminalreporter.stats.get("error", [])
     issue_reports = failed_reports + error_reports
 
-    failed_details = ""
-    if issue_reports:
-        failed_details = "\n*❌ 실패한 테스트 목록:*\n"
-        for rep in issue_reports[:5]:
-            failed_details += f"• `{rep.nodeid.split('::')[-1]}`\n"
-        if len(issue_reports) > 5:
-            failed_details += f"• 외 {len(issue_reports) - 5}개 더 실패함...\n"
+    failed_details = _format_issue_details(issue_reports)
 
     summary_text = (
         f"*{title}*\n"
